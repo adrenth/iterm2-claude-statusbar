@@ -1,0 +1,13 @@
+# Transient runtime state lives in $TMPDIR/claude-statusbar, never in the repo.
+*.log
+.DS_Store
+
+# Incidental local artifacts
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
