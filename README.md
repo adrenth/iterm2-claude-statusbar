@@ -6,8 +6,8 @@ pane. The in-Claude statusline row is intentionally left blank — all stats liv
 the iTerm2 status bar instead.
 
 ```
-✳ Opus · ctx 23% · 5h 41% 2h13m · 7d 60% 3d4h  (a live Claude pane)
-No Claude Session                               (a pane with no live Claude session)
+✳ Opus · xhigh · ctx 23% · 5h 41% 2h13m · 7d 60% 3d4h  (a live Claude pane)
+No Claude Session                                      (a pane with no live Claude session)
 ```
 
 ## Why it's built this way
@@ -46,8 +46,8 @@ Claude Code ──stdin JSON──► iterm2-statusbar-bridge.sh   (the statusLi
 Clone this repo anywhere, then run the installer from inside it:
 
 ```bash
-git clone https://github.com/adrenth/iterm2-statusbar.git
-cd iterm2-statusbar
+git clone https://github.com/adrenth/iterm2-claude-statusbar.git
+cd iterm2-claude-statusbar
 ./install.sh
 ```
 
@@ -136,4 +136,6 @@ State lives in `$TMPDIR/iterm2-claude-statusbar/` (transient; auto-cleared on re
 
 - **v2:** click the component to open a popover (`async_open_popover`) with the full
   breakdown including **session cost** (captured in the state file, not rendered
-  inline). The model name is shown inline (leftmost; first to drop when the bar narrows).
+  inline). The model name and effort level are shown inline as separate segments
+  (leftmost, e.g. `Opus · xhigh`); effort drops first when the bar narrows, then the
+  model. Effort is omitted for models that don't support it.

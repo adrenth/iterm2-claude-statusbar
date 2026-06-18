@@ -44,6 +44,7 @@ payload="$(
                        resets_at: .rate_limits.seven_day.resets_at
                      } else null end),
     model:          (.model.display_name // null),
+    effort:         (.effort.level // null),
     cost_usd:       (.cost.total_cost_usd // null),
     session_id:     (.session_id // null)
   }' 2>/dev/null

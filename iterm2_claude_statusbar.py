@@ -106,6 +106,12 @@ def _render(state):
     model = state.get("model")
     model_str = model if isinstance(model, str) and model else None
 
+    # Effort level (e.g. "xhigh") as its own segment after the model. Absent for
+    # models that don't support effort. Shown only alongside the model — without a
+    # model it has no anchor, so it drops too.
+    effort = state.get("effort")
+    effort_str = effort if (model_str and isinstance(effort, str) and effort) else None
+
     ctx = state.get("ctx_pct")
     ctx_str = "ctx {}%".format(ctx) if isinstance(ctx, int) else None
 
@@ -136,8 +142,9 @@ def _render(state):
         return sep.join(p for p in parts if p)
 
     candidates = [
-        join([model_str, ctx_str, five_full, seven_full]),  # full: model + reset countdowns
-        join([ctx_str, five_full, seven_full]),     # drop model (first to go when tight)
+        join([model_str, effort_str, ctx_str, five_full, seven_full]),  # full: model + effort + countdowns
+        join([model_str, ctx_str, five_full, seven_full]),  # drop effort first
+        join([ctx_str, five_full, seven_full]),     # drop model
         join([ctx_str, five_short, seven_short]),    # drop reset times
         join([ctx_str, five_short]),                 # drop 7d
         ctx_str or five_short or seven_short,         # most essential single field
@@ -171,9 +178,9 @@ async def main(connection):
     # would only collide visually with that built-in field.
     component = iterm2.StatusBarComponent(
         short_description="Claude Status",
-        detailed_description="Per-pane Claude Code model, context % and 5h/7d rate limits",
+        detailed_description="Per-pane Claude Code model, effort, context % and 5h/7d rate limits",
         knobs=[],
-        exemplar="✳ Opus · ctx 23% · 5h 41% · 7d 60%",
+        exemplar="✳ Opus · xhigh · ctx 23% · 5h 41% · 7d 60%",
         update_cadence=3.0,
         identifier="adrenth.iterm2.claude-statusbar",
     )
