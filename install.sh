@@ -71,6 +71,13 @@ else
   ln -sf "$TARGET" "$LINK" && ok "symlinked component into AutoLaunch"
 fi
 
+# Python writes __pycache__ next to the symlink; iTerm2 then tries to load that dir as a
+# script ('The script "__pycache__" is malformed'). The component self-cleans on startup,
+# but clear it here too so the first cold start after install is already quiet.
+if [ -d "$AUTOLAUNCH/__pycache__" ]; then
+  rm -rf "$AUTOLAUNCH/__pycache__" && ok "cleared stray __pycache__ from AutoLaunch"
+fi
+
 # --- Patch settings.json (surgical + safe) -----------------------------------
 echo
 if [ ! -f "$SETTINGS" ]; then

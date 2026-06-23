@@ -21,9 +21,32 @@ Design notes (see the project plan for the full rationale):
 
 import json
 import os
+import shutil
 import time
 
 import iterm2
+
+
+def _purge_own_bytecode_cache():
+    """Delete the __pycache__ that Python writes next to this file in iTerm2's
+    AutoLaunch dir.
+
+    The AutoLaunch entry is a *symlink* to this script, so CPython writes the .pyc
+    next to the LINK (dirname(__file__)), not next to the real file. iTerm2 then scans
+    that dir and tries to load __pycache__ as a script, raising 'The script
+    "__pycache__" is malformed'. We can't stop the .pyc being written (it happens before
+    this code runs), but deleting it here is safe — the module is already loaded — and
+    keeps the dir clean for iTerm2's next cold start. Best-effort and total: any failure
+    is swallowed so this never blocks daemon startup.
+    """
+    try:
+        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "__pycache__")
+        shutil.rmtree(cache, ignore_errors=True)
+    except Exception:
+        pass
+
+
+_purge_own_bytecode_cache()
 
 HOME = os.path.expanduser("~")
 STATE_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "iterm2-claude-statusbar")
@@ -35,8 +58,8 @@ LOG_PATH = os.path.join(STATE_DIR, "component.log")
 # during idle), giving an honest "freshness" read. We deliberately do NOT count *down*
 # to the next refresh: that timer lives in the Claude process, not here, so a countdown
 # would lie during a busy turn (a long tool call that blocks statusLine renders). The
-# age only refines as fast as the component re-renders (update_cadence=3s), so it steps
-# ~0s, 3s, 6s… not every second. Note the resets_at countdowns are NOT affected by this
+# age refines as fast as the component re-renders (update_cadence=1s), so it ticks per
+# second. Note the resets_at countdowns are NOT affected by this
 # — they're recomputed locally each render and stay accurate regardless of payload age.
 AGE_MARKER = "⦿ "      # glyph + space, consistent with the "5h 41%" label-value style
 
