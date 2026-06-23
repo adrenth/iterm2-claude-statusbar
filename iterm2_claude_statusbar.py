@@ -8,12 +8,13 @@ iterm2-statusbar-writer.sh; resolves liveness from ~/.claude/sessions/*.json (PI
 file age). Always visible: shows "No Claude Session" when no live session is found.
 
 Design notes (see the project plan for the full rationale):
-  - update_cadence=3.0: re-render every 3s so "No Claude Session" appears within
-    ~3s of Claude exiting, and reset countdowns tick. The statusline itself stays
-    event-driven; this timer is independent.
+  - update_cadence=1.0: re-render every 1s so the "⦿Ns" data-age segment ticks per
+    second, "No Claude Session" appears within ~1s of Claude exiting, and reset
+    countdowns tick. The statusline itself stays event-driven; this timer is independent.
+    Each tick reads one small state file (TMPDIR/tmpfs) + lists sessions/*.json — cheap.
   - Liveness is PID-based: state.session_id -> sessions/*.json by .sessionId ->
     os.kill(pid, 0). File age never blanks the bar (only PID death does); age only
-    drives a cosmetic "stale" marker.
+    drives the cosmetic "⦿Ns" freshness segment.
   - coro() is TOTAL: it must never raise, or it would crash the run_forever daemon.
     Everything is wrapped; any error degrades to "No Claude Session" and is logged.
 """
@@ -29,15 +30,15 @@ STATE_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "iterm2-claude-status
 SESSIONS_DIR = os.path.join(HOME, ".claude", "sessions")
 LOG_PATH = os.path.join(STATE_DIR, "component.log")
 
-# "⋯" means the *usage %* (5h/7d pct, ctx%) may be out of date — those values only
-# change when Claude pipes a fresh payload. The resets_at countdown is NOT stale: it's
-# recomputed locally from (resets_at - now) every render, so it keeps ticking regardless.
-# With statusLine.refreshInterval=10s the timer re-renders well inside this 30s window
-# during idle, so the marker now effectively only appears during a busy turn (a long
-# tool call that blocks statusLine renders for >30s). Keep STALE_SECONDS comfortably
-# above refreshInterval so a single missed timer tick doesn't flicker the marker.
-STALE_SECONDS = 30          # older than this (but PID alive) -> append the "⋯" marker
-STALE_MARKER = " ⋯"
+# Data-age segment: "⦿Ns" = how long since the last fresh payload (now - written_at).
+# It counts UP and resets toward 0 when Claude pipes a new payload (refreshInterval=10s
+# during idle), giving an honest "freshness" read. We deliberately do NOT count *down*
+# to the next refresh: that timer lives in the Claude process, not here, so a countdown
+# would lie during a busy turn (a long tool call that blocks statusLine renders). The
+# age only refines as fast as the component re-renders (update_cadence=3s), so it steps
+# ~0s, 3s, 6s… not every second. Note the resets_at countdowns are NOT affected by this
+# — they're recomputed locally each render and stay accurate regardless of payload age.
+AGE_MARKER = "⦿ "      # glyph + space, consistent with the "5h 41%" label-value style
 
 # Prefixed to live-session output only (not "No Claude Session"), so the glyph means
 # "a Claude is running in this pane". iTerm2 returns plain text, so this is a Unicode
@@ -71,6 +72,27 @@ def _fmt_time(secs):
     if hours > 0:
         return "{}h{}m".format(hours, mins)
     return "{}m".format(mins)
+
+
+def _fmt_age(secs):
+    """Data age for the ⦿ segment: seconds-resolution. 7s / 1m20s / 5m / 1h2m.
+
+    Distinct from _fmt_time (which is tuned for the hours/days reset countdowns and
+    would render "0m" for a fresh payload). Caps at hours — if data is hours stale the
+    session is effectively dead and the bar will already say "No Claude Session".
+    """
+    secs = int(secs)
+    if secs < 0:
+        secs = 0
+    if secs < 60:
+        return "{}s".format(secs)
+    mins = secs // 60
+    rem = secs % 60
+    if mins < 60:
+        return "{}m{}s".format(mins, rem) if rem else "{}m".format(mins)
+    hours = mins // 60
+    mins = mins % 60
+    return "{}h{}m".format(hours, mins) if mins else "{}h".format(hours)
 
 
 def _session_alive(session_id):
@@ -139,6 +161,15 @@ def _render(state):
     five_full, five_short = limit_str(state.get("five_hour"), "5h")
     seven_full, seven_short = limit_str(state.get("seven_day"), "7d")
 
+    # Data-age segment "⦿Ns": seconds since the last payload, counting up, resetting
+    # when Claude refreshes. Skipped if written_at is missing or in the future (clock
+    # skew) — better to show nothing than a bogus/negative age. Least essential segment,
+    # so it's only in the widest candidate and drops first under width pressure.
+    written_at = state.get("written_at")
+    age_str = None
+    if isinstance(written_at, (int, float)) and now >= written_at:
+        age_str = AGE_MARKER + _fmt_age(now - written_at)
+
     # If we have literally nothing to show, fall back to the empty state.
     if ctx_str is None and five_short is None and seven_short is None:
         return NO_SESSION
@@ -149,8 +180,9 @@ def _render(state):
         return sep.join(p for p in parts if p)
 
     candidates = [
-        join([model_str, effort_str, ctx_str, five_full, seven_full]),  # full: model + effort + countdowns
-        join([model_str, ctx_str, five_full, seven_full]),  # drop effort first
+        join([model_str, effort_str, ctx_str, five_full, seven_full, age_str]),  # full: + age
+        join([model_str, effort_str, ctx_str, five_full, seven_full]),  # drop age first
+        join([model_str, ctx_str, five_full, seven_full]),  # drop effort
         join([ctx_str, five_full, seven_full]),     # drop model
         join([ctx_str, five_short, seven_short]),    # drop reset times
         join([ctx_str, five_short]),                 # drop 7d
@@ -163,12 +195,6 @@ def _render(state):
         if c and c not in seen:
             seen.add(c)
             options.append(c)
-
-    # Cosmetic staleness marker: PID alive but the usage % hasn't refreshed in a while
-    # (the countdowns above stay accurate regardless — see STALE_SECONDS).
-    written_at = state.get("written_at")
-    if isinstance(written_at, (int, float)) and (now - written_at) > STALE_SECONDS:
-        options = [o + STALE_MARKER for o in options]
 
     # Prefix the Claude mark on live output only. The two NO_SESSION early-returns
     # above (and coro's no-session path) deliberately stay un-prefixed.
@@ -188,8 +214,8 @@ async def main(connection):
         short_description="Claude Status",
         detailed_description="Per-pane Claude Code model, effort, context % and 5h/7d rate limits",
         knobs=[],
-        exemplar="✳ Opus · xhigh · ctx 23% · 5h 41% · 7d 60%",
-        update_cadence=3.0,
+        exemplar="✳ Opus · xhigh · ctx 23% · 5h 41% · 7d 60% · ⦿ 7s",
+        update_cadence=1.0,
         identifier="adrenth.iterm2.claude-statusbar",
     )
 

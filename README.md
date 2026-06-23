@@ -6,9 +6,13 @@ pane. The in-Claude statusline row is intentionally left blank — all stats liv
 the iTerm2 status bar instead.
 
 ```
-✳ Opus · xhigh · ctx 23% · 5h 41% 2h13m · 7d 60% 3d4h  (a live Claude pane)
-No Claude Session                                      (a pane with no live Claude session)
+✳ Opus · xhigh · ctx 23% · 5h 41% 2h13m · 7d 60% 3d4h · ⦿ 4s  (a live Claude pane)
+No Claude Session                                             (a pane with no live Claude session)
 ```
+
+The trailing `⦿ 4s` is the **data age** — seconds since Claude last piped fresh stats.
+It counts up and resets toward `⦿ 0s` on each refresh, so you can see at a glance how
+current the numbers are.
 
 ## Why it's built this way
 
@@ -77,15 +81,19 @@ That's it. Open a pane, run `claude`, and the bar shows live stats.
 
 - **Always visible.** A pane with no live Claude session shows `No Claude Session`
   (shrinking to `No Claude` / `—` in a narrow bar).
-- **Stale hint.** If Claude is alive but its data hasn't refreshed in >30s, a subtle
-  `⋯` is appended. The numbers stay shown; the bar does **not** blank.
-- **Refresh.** The component re-renders every 3s (`update_cadence`). On top of that the
-  installer sets `statusLine.refreshInterval` to **10s** in `settings.json`, so Claude
-  re-runs the bridge on a timer and the usage % / reset countdown stay fresh during idle
-  periods too — not only on events (new message, `/compact`, mode change). Tune or remove
-  it by editing `.statusLine.refreshInterval` in `settings.json`. Note: the timer is
-  documented to cover idle gaps; whether it also fires *during* a long tool call (when
-  Claude is busy) is not guaranteed by the docs, so the `⋯` hint may still appear then.
+- **Data age.** A trailing `⦿Ns` shows how many seconds ago Claude last piped fresh
+  stats, counting up and resetting toward `⦿0s` on each refresh. It's the least
+  essential segment, so it's the first to drop when the bar gets narrow. During normal
+  idle it hovers near the refresh interval; if it climbs high, Claude is busy (a long
+  tool call blocks statusLine renders) — the numbers stay shown either way.
+- **Refresh.** The component re-renders every 1s (`update_cadence`) so the `⦿Ns` age
+  ticks per second. On top of that the installer sets `statusLine.refreshInterval` to
+  **10s** in `settings.json`, so Claude re-runs the bridge on a timer and the usage % /
+  reset countdown stay fresh during idle periods too — not only on events (new message,
+  `/compact`, mode change). Tune or remove it by editing `.statusLine.refreshInterval`
+  in `settings.json`. Note: the timer is documented to cover idle gaps; whether it also
+  fires *during* a long tool call is not guaranteed, so `⦿Ns` can climb past the
+  interval while Claude is busy.
 - **Multiple panes** each show their own session's stats simultaneously.
 
 ## Editing / reloading

@@ -39,8 +39,10 @@ change), so without help the state file goes stale during idle/long turns. `inst
 therefore sets `statusLine.refreshInterval` (seconds, min 1; we ship `10`) in
 `settings.json`, which re-runs the bridge on a fixed timer on top of those events. This
 keeps the usage % / reset countdown fresh during idle periods; whether the timer also
-fires *during* a long tool call is undocumented, so the cosmetic `⋯` may still appear
-then (idle gap closed, busy gap probable-but-unverified).
+fires *during* a long tool call is undocumented (idle gap closed, busy gap
+probable-but-unverified). The data-age segment `⦿Ns` (`now - written_at`, see `_render`)
+surfaces this directly: it ticks up per second and resets on refresh, so a high `⦿`
+value during a busy turn is the visible symptom of the busy gap.
 
 The wrapper does **not** call any existing `~/.claude/statusline.sh` — it prints
 nothing. Its sole job is to receive Claude's stdin payload (the only source of live
@@ -67,7 +69,8 @@ all stats live in the iTerm2 bar. (To restore the in-Claude line, repoint
   timeout. Real Claude turn gaps were measured at up to 844s (long tool calls), so age
   cannot distinguish "busy" from "exited". The component resolves `state.session_id` ->
   `~/.claude/sessions/*.json` by matching `.sessionId` -> `os.kill(pid, 0)`. File age
-  drives only the cosmetic `⋯` marker (`STALE_SECONDS`), never the hard "No Claude Session".
+  drives only the cosmetic `⦿Ns` data-age segment (`now - written_at`, via `_fmt_age`),
+  never the hard "No Claude Session".
 
 ## Two-key model (why there are two identifiers)
 
