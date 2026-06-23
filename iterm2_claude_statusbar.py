@@ -29,6 +29,13 @@ STATE_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "iterm2-claude-status
 SESSIONS_DIR = os.path.join(HOME, ".claude", "sessions")
 LOG_PATH = os.path.join(STATE_DIR, "component.log")
 
+# "⋯" means the *usage %* (5h/7d pct, ctx%) may be out of date — those values only
+# change when Claude pipes a fresh payload. The resets_at countdown is NOT stale: it's
+# recomputed locally from (resets_at - now) every render, so it keeps ticking regardless.
+# With statusLine.refreshInterval=10s the timer re-renders well inside this 30s window
+# during idle, so the marker now effectively only appears during a busy turn (a long
+# tool call that blocks statusLine renders for >30s). Keep STALE_SECONDS comfortably
+# above refreshInterval so a single missed timer tick doesn't flicker the marker.
 STALE_SECONDS = 30          # older than this (but PID alive) -> append the "⋯" marker
 STALE_MARKER = " ⋯"
 
@@ -157,7 +164,8 @@ def _render(state):
             seen.add(c)
             options.append(c)
 
-    # Cosmetic staleness marker: PID alive but data hasn't refreshed in a while.
+    # Cosmetic staleness marker: PID alive but the usage % hasn't refreshed in a while
+    # (the countdowns above stay accurate regardless — see STALE_SECONDS).
     written_at = state.get("written_at")
     if isinstance(written_at, (int, float)) and (now - written_at) > STALE_SECONDS:
         options = [o + STALE_MARKER for o in options]
