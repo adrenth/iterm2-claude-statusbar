@@ -77,11 +77,15 @@ That's it. Open a pane, run `claude`, and the bar shows live stats.
 
 - **Always visible.** A pane with no live Claude session shows `No Claude Session`
   (shrinking to `No Claude` / `—` in a narrow bar).
-- **Stale hint.** If Claude is alive but its data hasn't refreshed in >30s (e.g. a
-  long tool call), a subtle `⋯` is appended. The numbers stay shown; the bar does
-  **not** blank.
-- **Refresh.** The component re-renders every 3s (`update_cadence`). The statusline
-  itself stays event-driven (no `refreshInterval`).
+- **Stale hint.** If Claude is alive but its data hasn't refreshed in >30s, a subtle
+  `⋯` is appended. The numbers stay shown; the bar does **not** blank.
+- **Refresh.** The component re-renders every 3s (`update_cadence`). On top of that the
+  installer sets `statusLine.refreshInterval` to **10s** in `settings.json`, so Claude
+  re-runs the bridge on a timer and the usage % / reset countdown stay fresh during idle
+  periods too — not only on events (new message, `/compact`, mode change). Tune or remove
+  it by editing `.statusLine.refreshInterval` in `settings.json`. Note: the timer is
+  documented to cover idle gaps; whether it also fires *during* a long tool call (when
+  Claude is busy) is not guaranteed by the docs, so the `⋯` hint may still appear then.
 - **Multiple panes** each show their own session's stats simultaneously.
 
 ## Editing / reloading
@@ -126,6 +130,12 @@ State lives in `$TMPDIR/iterm2-claude-statusbar/` (transient; auto-cleared on re
   reliable in practice. The only theoretical false-positive: Claude leaves a stale
   `sessions/*.json` AND that exact PID is recycled to an unrelated process. Not
   defended against (would reintroduce age fragility); noted here for completeness.
+- **The 5h/7d windows come *only* from the statusLine payload.** There is no API or
+  file that reports them more accurately (verified against Anthropic docs, mid-2026).
+  The `anthropic-ratelimit-*` HTTP headers and the Admin Usage/Cost API describe a
+  *different* limit system (per-API-key token buckets / historical usage), not the
+  Pro/Max 5h/7d subscription windows. So `refreshInterval` (re-rendering the statusLine
+  more often) is the only lever for freshness — there is no out-of-band source to poll.
 - **No inline color, and no code-set color.** The iTerm2 API returns plain text only.
   Status bar text color is iTerm2's built-in shared **Text Color** field, set in the
   config UI; a component's own ColorKnob does **not** paint the rendered text, and the
