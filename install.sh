@@ -31,6 +31,14 @@ esac
 
 NEW_CMD="$BRIDGE_CMD"
 
+# Claude renders the statusLine only on discrete events (new message, /compact, mode
+# change), so the bridge — and thus our state file — can go stale during idle periods
+# and long tool calls. refreshInterval (seconds, min 1) re-runs the command on a fixed
+# timer on top of those events, keeping the 5h/7d usage % and reset countdown fresh.
+# 10s clears the component's 30s staleness marker with room to spare while staying above
+# the daemon's own 3s render cadence (anything shorter is invisible at the iTerm2 side).
+REFRESH_INTERVAL=10
+
 ok()   { printf '  \033[01;32mPASS\033[00m %s\n' "$1"; }
 fail() { printf '  \033[01;31mFAIL\033[00m %s\n' "$1"; }
 info() { printf '  \033[01;34m••••\033[00m %s\n' "$1"; }
@@ -63,6 +71,13 @@ else
   ln -sf "$TARGET" "$LINK" && ok "symlinked component into AutoLaunch"
 fi
 
+# Python writes __pycache__ next to the symlink; iTerm2 then tries to load that dir as a
+# script ('The script "__pycache__" is malformed'). The component self-cleans on startup,
+# but clear it here too so the first cold start after install is already quiet.
+if [ -d "$AUTOLAUNCH/__pycache__" ]; then
+  rm -rf "$AUTOLAUNCH/__pycache__" && ok "cleared stray __pycache__ from AutoLaunch"
+fi
+
 # --- Patch settings.json (surgical + safe) -----------------------------------
 echo
 if [ ! -f "$SETTINGS" ]; then
@@ -75,31 +90,49 @@ if ! jq empty "$SETTINGS" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Apply one surgical jq filter to settings.json with the project's safety contract:
+# backup -> set -> re-validate -> auto-restore on failure. $1 is the jq program; any
+# further args are passed through to jq (e.g. --arg/--argjson bindings).
+apply_settings() {
+  local filter="$1"; shift
+  local stamp backup tmp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  backup="${SETTINGS}.bak-${stamp}"
+  cp "$SETTINGS" "$backup" && ok "backed up settings.json -> $(basename "$backup")"
+
+  tmp="$(mktemp)"
+  if jq "$@" "$filter" "$SETTINGS" > "$tmp" 2>/dev/null && jq empty "$tmp" >/dev/null 2>&1; then
+    mv -f "$tmp" "$SETTINGS"
+    return 0
+  fi
+  rm -f "$tmp"
+  fail "edit produced invalid JSON — restoring backup"
+  cp "$backup" "$SETTINGS"
+  exit 1
+}
+
 current="$(jq -r '.statusLine.command // empty' "$SETTINGS" 2>/dev/null)"
 if [ "$current" = "$NEW_CMD" ]; then
-  ok "settings.json already points at the wrapper (idempotent no-op)"
+  # Command is already ours; make sure refreshInterval is set/correct too, so a setup
+  # installed before this option existed gets the timer on a re-run. null compares unequal.
+  current_ri="$(jq -r '.statusLine.refreshInterval // empty' "$SETTINGS" 2>/dev/null)"
+  if [ "$current_ri" = "$REFRESH_INTERVAL" ]; then
+    ok "settings.json already points at the wrapper (refreshInterval=$REFRESH_INTERVAL; idempotent no-op)"
+  else
+    apply_settings '.statusLine.refreshInterval = $ri' --argjson ri "$REFRESH_INTERVAL"
+    ok "set statusLine.refreshInterval -> $REFRESH_INTERVAL"
+  fi
 elif [ -n "$current" ]; then
   fail "statusLine.command is already set to '$current'."
   info "Not overwriting it. Clear it and re-run, or set statusLine.command to: $NEW_CMD"
   exit 1
 else
-  # statusLine.command is unset/empty — safe to set (the common case).
-  stamp="$(date +%Y%m%d-%H%M%S)"
-  backup="${SETTINGS}.bak-${stamp}"
-  cp "$SETTINGS" "$backup" && ok "backed up settings.json -> $(basename "$backup")"
-
-  # Surgical: jq sets only the one value; key order is preserved (insertion order).
-  tmp="$(mktemp)"
-  if jq --arg cmd "$NEW_CMD" '.statusLine.command = $cmd' "$SETTINGS" > "$tmp" 2>/dev/null \
-     && jq empty "$tmp" >/dev/null 2>&1; then
-    mv -f "$tmp" "$SETTINGS"
-    ok "repointed statusLine.command -> wrapper"
-  else
-    rm -f "$tmp"
-    fail "edit produced invalid JSON — restoring backup"
-    cp "$backup" "$SETTINGS"
-    exit 1
-  fi
+  # statusLine.command is unset/empty — safe to set (the common case). One jq sets both
+  # the command (string) and refreshInterval (--argjson -> JSON number); key order is
+  # preserved (insertion order).
+  apply_settings '.statusLine.command = $cmd | .statusLine.refreshInterval = $ri' \
+    --arg cmd "$NEW_CMD" --argjson ri "$REFRESH_INTERVAL"
+  ok "repointed statusLine.command -> wrapper (refreshInterval=$REFRESH_INTERVAL)"
 fi
 
 echo

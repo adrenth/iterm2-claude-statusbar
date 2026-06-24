@@ -13,6 +13,13 @@ the data is bridged out of the statusLine path into a per-pane file the iTerm2 d
 reads. Read `README.md` for the user-facing install/behavior; this file is the
 architecture and the gotchas that aren't obvious from any single file.
 
+Re-verified against Anthropic docs (mid-2026): the 5h/7d **subscription** windows have
+no API or on-disk source. The `anthropic-ratelimit-*` response headers and the Admin
+Usage/Cost API are a *different* limit system (per-API-key token buckets / historical
+usage), not the Pro/Max 5h/7d windows — do not chase them as a "more accurate" source;
+that path is dead. The only freshness lever is making Claude re-render the statusLine
+more often (`refreshInterval`, set by `install.sh` — see below).
+
 ## Data flow (the big picture)
 
 ```
@@ -27,6 +34,16 @@ Three processes, two of them transient (wrapper + writer, spawned per statusline
 render) and one long-lived (the Python daemon). They communicate **only** through the
 state file in `$TMPDIR/iterm2-claude-statusbar/`. There is no other IPC.
 
+Claude renders the statusLine only on discrete events (new message, `/compact`, mode
+change), so without help the state file goes stale during idle/long turns. `install.sh`
+therefore sets `statusLine.refreshInterval` (seconds, min 1; we ship `10`) in
+`settings.json`, which re-runs the bridge on a fixed timer on top of those events. This
+keeps the usage % / reset countdown fresh during idle periods; whether the timer also
+fires *during* a long tool call is undocumented (idle gap closed, busy gap
+probable-but-unverified). The data-age segment `⦿Ns` (`now - written_at`, see `_render`)
+surfaces this directly: it ticks up per second and resets on refresh, so a high `⦿`
+value during a busy turn is the visible symptom of the busy gap.
+
 The wrapper does **not** call any existing `~/.claude/statusline.sh` — it prints
 nothing. Its sole job is to receive Claude's stdin payload (the only source of live
 rate-limit data) and feed the writer. The in-Claude statusline is deliberately blank;
@@ -39,8 +56,8 @@ all stats live in the iTerm2 bar. (To restore the in-Claude line, repoint
   dotfiles repo or a corporate sync). We no longer call it at all (the wrapper prints
   nothing), but it must remain untouched in case the user repoints
   `statusLine.command` back at it. The only file we change in `~/.claude/` is the
-  user's own `settings.json` (the `statusLine.command` value), done surgically by
-  `install.sh`.
+  user's own `settings.json` (the `statusLine.command` and `statusLine.refreshInterval`
+  values), done surgically by `install.sh`.
 - **The wrapper must stay a silent, total data-feed.** It captures stdin, pipes it to
   the writer with output suppressed (`>/dev/null 2>&1 || true`), and prints nothing on
   its own stdout. Any change must preserve empty stdout — if the wrapper ever prints,
@@ -52,7 +69,8 @@ all stats live in the iTerm2 bar. (To restore the in-Claude line, repoint
   timeout. Real Claude turn gaps were measured at up to 844s (long tool calls), so age
   cannot distinguish "busy" from "exited". The component resolves `state.session_id` ->
   `~/.claude/sessions/*.json` by matching `.sessionId` -> `os.kill(pid, 0)`. File age
-  drives only the cosmetic `⋯` marker (`STALE_SECONDS`), never the hard "No Claude Session".
+  drives only the cosmetic `⦿Ns` data-age segment (`now - written_at`, via `_fmt_age`),
+  never the hard "No Claude Session".
 
 ## Two-key model (why there are two identifiers)
 
